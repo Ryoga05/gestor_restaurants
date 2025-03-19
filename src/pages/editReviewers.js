@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Button, Card, Form, ListGroup, InputGroup, Pagination } from 'react-bootstrap';
 import { db } from "../firebaseConfig";  // Importamos la configuración de Firebase
-import { collection, getDocs, addDoc } from "firebase/firestore";
-import YOUTUBE_API_KEY from "../apiKeys"
+import { collection, doc, getDocs, addDoc, deleteDoc, updateDoc } from "firebase/firestore";
+import apiKeys from "../apiKeys"
 
 function EditReviewers() {
   const [view, setView] = useState("ver"); // 'ver' o 'crear'
@@ -29,6 +29,12 @@ const ReviewersList = () => {
   const [reviewers, setReviewers] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);  // Página actual
   const [itemsPerPage] = useState(1);  // Número de reviewers por página (puedes cambiar este número)
+  const [searchTerm, setSearchTerm] = useState(""); // Estado del buscador
+  const [channelId, setChannelId] = useState('');
+  const [name, setName] = useState("");
+  const [web, setWeb] = useState("");
+  const [avatarURL, setAvatarURL] = useState("");
+  const [lastVideoIDChecked, setLastVideoIDChecked] = useState("");
 
 
   useEffect(() => {
@@ -44,18 +50,27 @@ const ReviewersList = () => {
     fetchReviewers();
   }, []);
 
+  const filteredReviewers = searchTerm
+    ? reviewers.filter(reviewer => reviewer.Name.toLowerCase().includes(searchTerm.toLowerCase()))
+    : reviewers;
+
   // Función para obtener los reviewers de la página actual
   const indexOfLastReviewer = currentPage * itemsPerPage;
   const indexOfFirstReviewer = indexOfLastReviewer - itemsPerPage;
-  const currentReviewers = reviewers.slice(indexOfFirstReviewer, indexOfLastReviewer);
+  const currentReviewers = filteredReviewers.slice(indexOfFirstReviewer, indexOfLastReviewer);
 
   // Función para manejar el cambio de página
   const handlePageChange = (pageNumber) => {
     setCurrentPage(pageNumber);
+    setChannelId("");
+    setName("");
+    setWeb("");
+    setAvatarURL("");
+    setLastVideoIDChecked("");
   };
 
   // Generar el número de páginas
-  const totalPages = Math.ceil(reviewers.length / itemsPerPage);
+  const totalPages = Math.ceil(filteredReviewers.length / itemsPerPage);
   const paginationItems = [];
   for (let number = 1; number <= totalPages; number++) {
     paginationItems.push(
@@ -69,9 +84,67 @@ const ReviewersList = () => {
     window.open(web, '_blank')
   };
 
+  const updateReviewer = async (id) => {
+    try {
+      await updateDoc(doc(db, "Reviewers", id), {
+        Name: name,
+        Web: web,
+        AvatarURL: avatarURL || "/default-avatar.png",
+        LastVideoIDChecked: lastVideoIDChecked,
+      });
+
+      setChannelId("");
+      setName("");
+      setWeb("");
+      setAvatarURL("");
+      setLastVideoIDChecked("");
+      alert("Reviewer actualizado con exito!")
+      
+    } catch (error) {
+      console.error("Error al actualizar el reviewer: ", error);
+    }
+  };
+
+  const deleteReviewer = async (id) => {
+    try {
+      await deleteDoc(doc(db, "Reviewers", id));
+      setReviewers(prevReviewers => prevReviewers.filter(reviewer => reviewer.id !== id));
+      setChannelId("");
+      setName("");
+      setWeb("");
+      setAvatarURL("");
+      setLastVideoIDChecked("");
+      alert("Reviewer eliminado con exito!")
+    } catch (error) {
+      console.error("Error al eliminar el reviewer: ", error);
+    }
+  };
+
   return (
     <Card className="mx-auto mt-4 p-4 shadow-sm" style={{ maxWidth: "400px" }}>
       <h5 className="text-center">Lista de Reviewers</h5>
+      {/* Buscador */}
+      <Form.Group className="mb-3">
+        <InputGroup>
+          <Form.Control
+            type="text"
+            placeholder="Buscar reviewer por nombre..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1); // Reiniciar a la primera página cuando se busca
+            }}
+          />
+          {searchTerm && (
+            <Button variant="outline-secondary" onClick={() => {
+              setSearchTerm(""); // Vaciar el buscador
+              setCurrentPage(1); // Reiniciar paginación
+            }}>
+              ❌
+            </Button>
+          )}
+        </InputGroup>
+      </Form.Group>
       <ListGroup>
         {currentReviewers.map(reviewer => (
           <ListGroup.Item key={reviewer.id}>
@@ -79,25 +152,34 @@ const ReviewersList = () => {
               <Form.Group className="mb-3">
                 <Form.Label>URL de l'Avatar:</Form.Label>
                 <div className="d-flex align-items-center">
-                  <Form.Control type="text" value={reviewer.AvatarURL} readOnly />
-                  <img src={reviewer.AvatarURL || "/User_icon.png"} alt="avatar" width="40" className="ms-2"/>
+                  <Form.Control type="text" 
+                  value={avatarURL || reviewer.AvatarURL} // Esto asegura que el valor predeterminado sea el de reviewer
+                  onChange={(e) => setAvatarURL(e.target.value)} // Actualiza el estado avatarURL
+                  />
+                  <img src={avatarURL || reviewer.AvatarURL} alt="avatar" width="40" className="ms-2" onError={(e) => e.target.src = "/User_icon.png"}/>
                 </div>
               </Form.Group>
 
               <Form.Group className="mb-3">
                 <Form.Label>Últim Vídeo Comprovat:</Form.Label>
-                <Form.Control type="text" value={reviewer.LastVideoIDChecked} readOnly />
+                <Form.Control type="text" 
+                value={lastVideoIDChecked || reviewer.LastVideoIDChecked} 
+                onChange={(e) => setLastVideoIDChecked(e.target.value)} />
               </Form.Group>
 
               <Form.Group className="mb-3">
                 <Form.Label>Nom:</Form.Label>
-                <Form.Control type="text" value={reviewer.Name} readOnly/>
+                <Form.Control type="text" 
+                value={name || reviewer.Name}
+                onChange={(e) => setName(e.target.value)}/>
               </Form.Group>
 
               <Form.Group className="mb-3">
                 <Form.Label>Web:</Form.Label>
                 <InputGroup>
-                  <Form.Control type="text" value={reviewer.Web} readOnly/>
+                  <Form.Control type="text"
+                  value={web || reviewer.Web}
+                  onChange={(e) => setWeb(e.target.value)}/>
                   <Button variant="light" onClick={() => handleWebVisit(reviewer.Web)} className="border me-2">Visitar web</Button>
                 </InputGroup>
               </Form.Group>
@@ -105,8 +187,17 @@ const ReviewersList = () => {
               <Form.Group className="mb-3">
                 <Form.Label>Channel ID:</Form.Label>
                 <InputGroup>
-                  <Form.Control type="text" value={reviewer.id} readOnly/>
+                  <Form.Control type="text"
+                  value={channelId || reviewer.ChannelID}
+                  onChange={(e) => setChannelId(e.target.value)}/>
                   <Button variant="light" className="border me-2" disabled>Obtenir Channel ID</Button>
+                </InputGroup>
+              </Form.Group>
+
+              <Form.Group className="mb-3">
+                <InputGroup className='justify-content-center'>
+                  <Button variant="primary" onClick={() => updateReviewer(reviewer.id)} className="border me-2">Actualizar</Button>
+                  <Button variant="danger" onClick={() => deleteReviewer(reviewer.id)} className="border me-2">Eliminar </Button>
                 </InputGroup>
               </Form.Group>
             </Form>
@@ -141,6 +232,7 @@ const CreateReviewerForm = () => {
 
     try {
       const handle = web.split("@").pop(); 
+      const YOUTUBE_API_KEY = apiKeys.YOUTUBE_API_KEY;
       const response = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${handle}&key=${YOUTUBE_API_KEY}`);
       const data = await response.json();
       
@@ -164,11 +256,11 @@ const CreateReviewerForm = () => {
 
     try {
       await addDoc(collection(db, "Reviewers"), {
+        AvatarURL: avatarURL || "/default-avatar.png",
+        LastVideoIDChecked: lastVideoIDChecked,
         Name: name,
         Web: web,
-        AvatarURL: avatarURL || "/default-avatar.png",
         ChannelID: channelId,
-        LastVideoIDChecked: lastVideoIDChecked,
       });
 
       // Limpiar formulario después de agregar
@@ -191,7 +283,7 @@ const CreateReviewerForm = () => {
           <Form.Label>URL de l'Avatar:</Form.Label>
           <div className="d-flex align-items-center">
             <Form.Control type="text" placeholder="" onChange={(e) => setAvatarURL(e.target.value)}/>
-            <img src="/User_icon.png" alt="avatar" width="40" className="ms-2"/>
+            <img src={avatarURL} alt="avatar" width="40" className="ms-2" onError={(e) => e.target.src = "/User_icon.png"} />
           </div>
         </Form.Group>
 
@@ -207,10 +299,7 @@ const CreateReviewerForm = () => {
 
         <Form.Group className="mb-3">
           <Form.Label>Web:</Form.Label>
-          <InputGroup>
-            <Form.Control type="text" placeholder="https://www.youtube.com/@name" onChange={(e) => setWeb(e.target.value)}/>
-            <Button variant="light" className="border me-2">Visitar web</Button>
-          </InputGroup>
+          <Form.Control type="text" placeholder="https://www.youtube.com/@name" onChange={(e) => setWeb(e.target.value)}/>
         </Form.Group>
 
         <Form.Group className="mb-3">
