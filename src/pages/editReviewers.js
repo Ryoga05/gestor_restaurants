@@ -91,7 +91,7 @@ const ReviewersList = () => {
 
               <Form.Group className="mb-3">
                 <Form.Label>Nom:</Form.Label>
-                <Form.Control type="text" value={reviewer.Name} onChange={setName} readOnly/>
+                <Form.Control type="text" value={reviewer.Name} readOnly/>
               </Form.Group>
 
               <Form.Group className="mb-3">
@@ -126,7 +126,6 @@ const ReviewersList = () => {
 };
 
 const CreateReviewerForm = () => {
-  const [handle, setHandle] = useState('');
   const [channelId, setChannelId] = useState('');
   const [name, setName] = useState("");
   const [web, setWeb] = useState("");
@@ -135,12 +134,13 @@ const CreateReviewerForm = () => {
   const [error, setError] = useState('');
 
   const obtenerChannelId = async () => {
-    if (!handle) {
+    if (!web) {
       setError('Por favor ingrese un nombre de canal válido.');
       return;
     }
 
     try {
+      const handle = web.split("@").pop(); 
       const response = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${handle}&key=${YOUTUBE_API_KEY}`);
       const data = await response.json();
       
@@ -172,11 +172,11 @@ const CreateReviewerForm = () => {
       });
 
       // Limpiar formulario después de agregar
-      setHandle("");
       setChannelId("");
       setName("");
       setWeb("");
       setAvatarURL("");
+      setLastVideoIDChecked("");
       setError("");
       alert("Reviewer agregado con éxito 🎉");
     } catch (err) {
@@ -190,25 +190,25 @@ const CreateReviewerForm = () => {
         <Form.Group className="mb-3">
           <Form.Label>URL de l'Avatar:</Form.Label>
           <div className="d-flex align-items-center">
-            <Form.Control type="text" placeholder="" />
+            <Form.Control type="text" placeholder="" onChange={(e) => setAvatarURL(e.target.value)}/>
             <img src="/User_icon.png" alt="avatar" width="40" className="ms-2"/>
           </div>
         </Form.Group>
 
         <Form.Group className="mb-3">
           <Form.Label>Últim Vídeo Comprovat:</Form.Label>
-          <Form.Control type="text" />
+          <Form.Control type="text" onChange={(e) => setLastVideoIDChecked(e.target.value)}/>
         </Form.Group>
 
         <Form.Group className="mb-3">
           <Form.Label>Nom:</Form.Label>
-          <Form.Control type="text" />
+          <Form.Control type="text" onChange={(e) => setName(e.target.value)}/>
         </Form.Group>
 
         <Form.Group className="mb-3">
           <Form.Label>Web:</Form.Label>
           <InputGroup>
-            <Form.Control type="text" placeholder="https://www.youtube.com/@name" onChange={(e) => setHandle(e.target.value)}/>
+            <Form.Control type="text" placeholder="https://www.youtube.com/@name" onChange={(e) => setWeb(e.target.value)}/>
             <Button variant="light" className="border me-2">Visitar web</Button>
           </InputGroup>
         </Form.Group>
@@ -216,7 +216,7 @@ const CreateReviewerForm = () => {
         <Form.Group className="mb-3">
           <Form.Label>Channel ID:</Form.Label>
           <InputGroup>
-            <Form.Control type="text" value={channelId} readOnly/>
+            <Form.Control type="text" value={channelId} onChange={(e) => setChannelId(e.target.value)}/>
             <Button variant="light" className="border me-2" onClick={obtenerChannelId}>Obtenir Channel ID</Button>
           </InputGroup>
           {error && <div className="text-danger mt-2">{error}</div>}
