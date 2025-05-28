@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Button, Card, Form, ListGroup, InputGroup, Pagination } from 'react-bootstrap';
+import { Container, Button, Card, Form, ListGroup, InputGroup, Pagination, Alert, Spinner } from 'react-bootstrap';
 import { db } from "../firebaseConfig";  // Importamos la configuración de Firebase
-import { collection, doc, getDocs, addDoc, deleteDoc, updateDoc } from "firebase/firestore";
-import apiKeys from "../apiKeys"
+import { collection, doc, getDocs, setDoc, deleteDoc, updateDoc, addDoc} from "firebase/firestore";
+import axios from "axios";
+import apiKeys from "../apiKeys";
 
 function EditReviewers() {
   const [view, setView] = useState("ver"); // 'ver' o 'crear'
@@ -30,6 +31,11 @@ const ReviewersList = () => {
   const [currentPage, setCurrentPage] = useState(1);  // Página actual
   const [itemsPerPage] = useState(1);  // Número de reviewers por página (puedes cambiar este número)
   const [searchTerm, setSearchTerm] = useState(""); // Estado del buscador
+  const [videos, setVideos] = useState([]); // Estado para almacenar los videos
+  const [nextPageToken, setNextPageToken] = useState(null); // Para manejar la paginación
+  const [loading, setLoading] = useState(false); // Para mostrar un indicador de carga
+  const [videoId, setVideoId] = useState(""); // ID de video desde el cual cargar los videos
+
   const [channelId, setChannelId] = useState('');
   const [name, setName] = useState("");
   const [web, setWeb] = useState("");
@@ -80,17 +86,89 @@ const ReviewersList = () => {
     );
   }
 
+  const loadVideos = async (reviewerChannelId, videoId) => {
+  try {
+    setLoading(true);
+
+    const YOUTUBE_API_KEY = apiKeys.YOUTUBE_API_KEY;
+    let partOfUrl = "";
+
+    // Si hay un videoId, buscamos su fecha de publicación
+    if (videoId) {
+      const videoUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
+      const videoResponse = await axios.get(videoUrl);
+      const videoData = videoResponse.data.items[0];
+
+      if (videoData) {
+        const publishedAt = videoData.snippet.publishedAt;
+        partOfUrl = `&publishedAfter=${publishedAt}`;
+      }
+    }
+
+    let searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${reviewerChannelId}&maxResults=10&order=date&key=${YOUTUBE_API_KEY}`;
+
+    if (partOfUrl) {
+      searchUrl += partOfUrl;
+    }
+    if (nextPageToken) {
+      searchUrl += `&pageToken=${nextPageToken}`;
+    }
+    
+    const response = await axios.get(searchUrl);
+    const newVideos = response.data.items;
+
+  // Guardar en Firebase
+  for (const video of newVideos) {
+    if (video.id.videoId) {
+      const videoDoc = {
+        videoId: video.id.videoId,
+        publishedAt: video.snippet.publishedAt,
+        title: video.snippet.title,
+        channelId: reviewerChannelId,
+        type: "youtube",
+      };
+
+      try {
+        await addDoc(collection(db, "VideosToEdit"), videoDoc);
+      } catch (e) {
+        console.error("Error al guardar video en Firebase:", e);
+      }
+    }
+  }
+
+  // Actualizamos el último video procesado
+    const newestVideoId = newVideos[0]?.id?.videoId;
+    if (newestVideoId) {
+      const reviewerDocRef = doc(db, "Reviewers", reviewerChannelId);
+      await updateDoc(reviewerDocRef, {
+        LastVideoIDChecked: newestVideoId,
+      });
+    }
+
+    setVideos(prevVideos => [...prevVideos, ...newVideos]);
+    setNextPageToken(response.data.nextPageToken);
+  } catch (error) {
+    alert("Error al cargar los videos: ", error);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
   const handleWebVisit = (web) => {
     window.open(web, '_blank')
   };
 
   const updateReviewer = async (id) => {
     try {
+      // Busca el reviewer original
+      const reviewer = reviewers.find(r => r.id === id);
+
       await updateDoc(doc(db, "Reviewers", id), {
-        Name: name,
-        Web: web,
-        AvatarURL: avatarURL || "/default-avatar.png",
-        LastVideoIDChecked: lastVideoIDChecked,
+        Name: name || reviewer.Name,
+        Web: web || reviewer.Web,
+        AvatarURL: avatarURL || reviewer.AvatarURL,
+        LastVideoIDChecked: lastVideoIDChecked || reviewer.LastVideoIDChecked,
       });
 
       setChannelId("");
@@ -162,10 +240,21 @@ const ReviewersList = () => {
 
               <Form.Group className="mb-3">
                 <Form.Label>Últim Vídeo Comprovat:</Form.Label>
-                <Form.Control type="text" 
-                value={lastVideoIDChecked || reviewer.LastVideoIDChecked} 
-                onChange={(e) => setLastVideoIDChecked(e.target.value)} />
+                <InputGroup>
+                  <Form.Control type="text" 
+                  value={lastVideoIDChecked || reviewer.LastVideoIDChecked} 
+                  onChange={(e) => setLastVideoIDChecked(e.target.value)} />
+                  <Button variant="light" onClick={() => loadVideos(reviewer.id, reviewer.LastVideoIDChecked)} className="border">Carregar últims vídeos</Button>
+                </InputGroup>
               </Form.Group>
+
+              {/* Mensaje de carga */}
+              {loading && (
+                <Alert variant="info" className="mt-3 text-center">
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  Cargando videos...
+                </Alert>
+              )}
 
               <Form.Group className="mb-3">
                 <Form.Label>Nom:</Form.Label>
@@ -180,7 +269,7 @@ const ReviewersList = () => {
                   <Form.Control type="text"
                   value={web || reviewer.Web}
                   onChange={(e) => setWeb(e.target.value)}/>
-                  <Button variant="light" onClick={() => handleWebVisit(reviewer.Web)} className="border me-2">Visitar web</Button>
+                  <Button variant="light" onClick={() => handleWebVisit(reviewer.Web)} className="border">Visitar web</Button>
                 </InputGroup>
               </Form.Group>
 
@@ -188,17 +277,15 @@ const ReviewersList = () => {
                 <Form.Label>Channel ID:</Form.Label>
                 <InputGroup>
                   <Form.Control type="text"
-                  value={channelId || reviewer.ChannelID}
+                  value={channelId || reviewer.id}
                   onChange={(e) => setChannelId(e.target.value)}/>
-                  <Button variant="light" className="border me-2" disabled>Obtenir Channel ID</Button>
+                  <Button variant="light" className="border" disabled>Obtenir Channel ID</Button>
                 </InputGroup>
               </Form.Group>
 
-              <Form.Group className="mb-3">
-                <InputGroup className='justify-content-center'>
-                  <Button variant="primary" onClick={() => updateReviewer(reviewer.id)} className="border me-2">Actualizar</Button>
-                  <Button variant="danger" onClick={() => deleteReviewer(reviewer.id)} className="border me-2">Eliminar </Button>
-                </InputGroup>
+              <Form.Group className="d-flex mb-3 justify-content-center">
+                <Button variant="primary" onClick={() => updateReviewer(reviewer.id)} className="border me-2">Actualizar</Button>
+                <Button variant="danger" onClick={() => deleteReviewer(reviewer.id)} className="border ms-2">Eliminar </Button>
               </Form.Group>
             </Form>
           </ListGroup.Item>
@@ -255,12 +342,11 @@ const CreateReviewerForm = () => {
     }
 
     try {
-      await addDoc(collection(db, "Reviewers"), {
+      await setDoc(doc(db, "Reviewers", channelId), {
         AvatarURL: avatarURL || "/default-avatar.png",
         LastVideoIDChecked: lastVideoIDChecked,
         Name: name,
         Web: web,
-        ChannelID: channelId,
       });
 
       // Limpiar formulario después de agregar
